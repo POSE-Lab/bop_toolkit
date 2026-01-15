@@ -163,7 +163,9 @@ for result_filename in p["result_filenames"]:
     _, _, times, times_available = inout.check_consistent_timings(coco_results, "image_id")
 
     # initialize COCO ground truth api
-    cocoGt = COCO(dataset_coco_ann)
+    cocoGt = COCO()
+    cocoGt.dataset = dataset_coco_ann
+    cocoGt.createIndex()
 
     if p["ann_type"] == "segm":
         pycoco_utils.ensure_rle_binary(dataset_coco_results, cocoGt)
