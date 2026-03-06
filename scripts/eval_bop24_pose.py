@@ -31,8 +31,8 @@ p = {
         {
             "n_top": 0,
             "type": "mssd",
-            "correct_th": [[th] for th in range(2,21,2)],
-            "threshold_unit": "mm"
+            "correct_th": [[th] for th in range(2, 21, 2)],
+            "threshold_unit": "mm",
         },
         {
             "n_top": 0,
@@ -68,6 +68,7 @@ p = {
     "max_num_estimates_per_image": 100,  # Maximum number of estimates per image.
     "use_gpu": config.use_gpu,  # Use torch for the calculation of errors.
     "device": "cuda:0",  # if use_gpu is true, use "device" for torch computations.
+    "datasets_path": config.datasets_path,  # Root directory where BOP-H3 datasets are stored.
 }
 ################################################################################
 
@@ -78,7 +79,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--renderer_type", type=str, default=p["renderer_type"])
 parser.add_argument(
     "--result_filenames",
-     type=str,
+    type=str,
     default=",".join(p["result_filenames"]),
     help="Comma-separated names of files with results.",
 )
@@ -88,7 +89,13 @@ parser.add_argument("--targets_filename", type=str, default=p["targets_filename"
 parser.add_argument("--num_workers", type=int, default=p["num_workers"])
 parser.add_argument("--use_gpu", action="store_true", default=p["use_gpu"])
 parser.add_argument("--device", type=str, default=p["device"])
-parser.add_argument("--cleanup_eval", action="store_true", default=False, help="Delete error folders after evaluation (default: False)")
+parser.add_argument(
+    "--cleanup_eval",
+    action="store_true",
+    default=False,
+    help="Delete error folders after evaluation (default: False)",
+)
+parser.add_argument("--datasets_path", type=str, default=p["datasets_path"])
 args = parser.parse_args()
 
 result_filenames = args.result_filenames.split(",")
@@ -114,8 +121,14 @@ for result_filename in result_filenames:
 
     # Load and check results, calculate the average estimation time per image.
     result_path = os.path.join(args.results_path, result_filename)
-    ests = inout.load_bop_results(result_path, version="bop19", max_num_estimates_per_image=p["max_num_estimates_per_image"])
-    check_passed, check_msg, times, times_available = inout.check_consistent_timings(ests, "im_id")
+    ests = inout.load_bop_results(
+        result_path,
+        version="bop19",
+        max_num_estimates_per_image=p["max_num_estimates_per_image"],
+    )
+    check_passed, check_msg, times, times_available = inout.check_consistent_timings(
+        ests, "im_id"
+    )
     if not check_passed:
         raise ValueError(check_msg)
     average_time_per_image = np.mean(list(times.values())) if times_available else -1.0
@@ -125,7 +138,9 @@ for result_filename in result_filenames:
     # Evaluate the pose estimates.
     for error in p["errors"]:
         # Calculate error of the pose estimates.
-        calc_error_script, is_gpu_script_used = misc.get_eval_calc_errors_script_name(args.use_gpu, error["type"], dataset)
+        calc_error_script, is_gpu_script_used = misc.get_eval_calc_errors_script_name(
+            args.use_gpu, error["type"], dataset
+        )
         calc_errors_cmd = [
             "python",
             os.path.join(
@@ -144,6 +159,7 @@ for result_filename in result_filenames:
             "--max_sym_disc_step={}".format(p["max_sym_disc_step"]),
             "--skip_missing=1",
             "--num_workers={}".format(args.num_workers),
+            "--datasets_path={}".format(args.datasets_path),
         ]
         if is_gpu_script_used:
             calc_errors_cmd.append(f"--device={args.device}")
@@ -175,11 +191,10 @@ for result_filename in result_filenames:
                     "--targets_filename={}".format(args.targets_filename),
                     "--visib_gt_min={}".format(p["visib_gt_min"]),
                     "--eval_mode=detection",
+                    "--datasets_path={}".format(args.datasets_path),
                 ]
                 if "threshold_unit" in error:
-                    calc_scores_cmd += [
-                        "--normalized_by_diameter=[]"
-                    ]
+                    calc_scores_cmd += ["--normalized_by_diameter=[]"]
                 if p["ignore_object_visible_less_than_visib_gt_min"]:
                     calc_scores_cmd += [
                         "--ignore_object_visible_less_than_visib_gt_min"
@@ -231,7 +246,9 @@ for result_filename in result_filenames:
                 ]
                 for obj_id in scores:
                     if num_instances_per_object[obj_id] > 0:
-                        mAP_scores_per_object.setdefault(obj_id, []).append(scores[obj_id])
+                        mAP_scores_per_object.setdefault(obj_id, []).append(
+                            scores[obj_id]
+                        )
                     else:
                         mAP_scores_per_object.setdefault(obj_id, []).append(0)
                         num_object_ids_ignored.append(obj_id)
@@ -275,7 +292,9 @@ for result_filename in result_filenames:
         logger.info(f"Cleaning up eval folder {sub_eval_dir}.")
         inout.cleanup_eval(sub_eval_dir, logger)
     else:
-        logger.info("Skipping deletion of error folders (use --cleanup_eval to enable).")
+        logger.info(
+            "Skipping deletion of error folders (use --cleanup_eval to enable)."
+        )
 
     # Calculate the final scores.
     final_scores = {}
@@ -291,14 +310,10 @@ for result_filename in result_filenames:
     )
 
     # Final score for the given dataset.
-    final_scores["bop25_mAP"] = np.mean(
-        [mAP_per_error_type["mssd"]]
-    )
+    final_scores["bop25_mAP"] = np.mean([mAP_per_error_type["mssd"]])
 
-        # Final score for the given dataset.
-    final_scores["bop25_mAP_mm"] = np.mean(
-        [mAP_per_error_type["mssd_mm"]]
-    )
+    # Final score for the given dataset.
+    final_scores["bop25_mAP_mm"] = np.mean([mAP_per_error_type["mssd_mm"]])
 
     # Average estimation time per image.
     final_scores["bop24_average_time_per_image"] = average_time_per_image
